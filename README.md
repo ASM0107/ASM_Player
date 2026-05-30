@@ -1,12 +1,18 @@
 # ASM Media Player
 
-ASM Media Player is a modern, cross-platform media player built using Python and PyQt6. It aims to provide a robust, VLC-like experience with a sleek dark theme and seamless media playback capabilities.
+ASM Media Player is a modern, cross-platform media player built using Python and PySide6. It aims to provide a robust, VLC-like experience with a sleek dark theme and seamless media playback capabilities.
 
 ## Features
 
-- **Media Playback**: Supports a variety of video and audio formats (MP4, MKV, AVI, WMV, MP3, WAV, etc.) using `PyQt6.QtMultimedia`.
-- **Modern UI**: A clean, custom dark theme providing an industry-grade look and feel.
-- **Controls**: Play/Pause, Stop, Progress slider with time display, and Volume control.
+- **Media Playback**: Supports a variety of video and audio formats (MP4, MKV, AVI, WMV, MP3, WAV, etc.) using `PySide6.QtMultimedia`.
+- **Advanced Controls**: Playback speed adjustment (0.5x to 2x), quick mute toggle, and skip forwards/backwards 10 seconds.
+- **Keyboard Shortcuts**: 
+  - `Space` to Play/Pause
+  - `Left/Right Arrows` to skip 10 seconds
+  - `Up/Down Arrows` for Volume Control
+  - `F` or `Double-Click` to Toggle Fullscreen
+  - `M` to Mute/Unmute
+- **Modern UI**: A premium custom dark theme providing an industry-grade look and feel.
 - **Cross-Platform**: Runs on Windows, macOS, and Linux seamlessly.
 
 ## Prerequisites

@@ -1,13 +1,13 @@
 import os
 import sys
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QSlider, QLabel, QFileDialog, QStyle, QMessageBox
+    QSlider, QLabel, QFileDialog, QStyle, QMessageBox, QComboBox
 )
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PyQt6.QtMultimediaWidgets import QVideoWidget
-from PyQt6.QtGui import QAction, QIcon
+from PySide6.QtCore import Qt, QUrl, QEvent, QTimer
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtGui import QAction, QIcon, QKeySequence
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -15,7 +15,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("ASM Media Player")
         self.resize(1024, 576)
         
-        # Initialize media player and video widget
+        # Core Player Initialization
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
@@ -23,9 +23,18 @@ class MainWindow(QMainWindow):
         self.video_widget = QVideoWidget()
         self.media_player.setVideoOutput(self.video_widget)
         
-        # Set up the UI
+        # State variables
+        self.is_muted = False
+        self.last_volume = 100
+        self.is_fullscreen = False
+        
+        # Setup UI
         self.setup_ui()
         self.setup_menu()
+        self.setup_shortcuts()
+        
+        # Event Filters
+        self.video_widget.installEventFilter(self)
         
         # Connect signals
         self.media_player.playbackStateChanged.connect(self.media_state_changed)
@@ -34,20 +43,21 @@ class MainWindow(QMainWindow):
         self.media_player.errorChanged.connect(self.handle_error)
 
     def setup_ui(self):
-        central_widget = QWidget(self)
-        self.setCentralWidget(central_widget)
+        self.central_widget = QWidget(self)
+        self.setCentralWidget(self.central_widget)
         
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        self.main_layout = QVBoxLayout()
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
         
         # Video area
         self.video_widget.setStyleSheet("background-color: black;")
-        layout.addWidget(self.video_widget, stretch=1)
+        self.main_layout.addWidget(self.video_widget, stretch=1)
         
         # Controls area
-        controls_layout = QVBoxLayout()
-        controls_layout.setContentsMargins(10, 10, 10, 10)
+        self.controls_widget = QWidget()
+        controls_layout = QVBoxLayout(self.controls_widget)
+        controls_layout.setContentsMargins(15, 10, 15, 15)
         
         # Progress slider
         self.position_slider = QSlider(Qt.Orientation.Horizontal)
@@ -58,36 +68,73 @@ class MainWindow(QMainWindow):
         # Buttons and time labels
         buttons_layout = QHBoxLayout()
         
+        # Play/Pause
         self.play_button = QPushButton()
         self.play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self.play_button.setToolTip("Play/Pause (Space)")
         self.play_button.clicked.connect(self.toggle_playback)
         buttons_layout.addWidget(self.play_button)
         
+        # Stop
         self.stop_button = QPushButton()
         self.stop_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
+        self.stop_button.setToolTip("Stop")
         self.stop_button.clicked.connect(self.stop_playback)
         buttons_layout.addWidget(self.stop_button)
         
+        # Skip Backwards
+        self.skip_back_btn = QPushButton()
+        self.skip_back_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSkipBackward))
+        self.skip_back_btn.setToolTip("Skip Back 10s (Left Arrow)")
+        self.skip_back_btn.clicked.connect(lambda: self.skip(-10000))
+        buttons_layout.addWidget(self.skip_back_btn)
+        
+        # Skip Forwards
+        self.skip_fwd_btn = QPushButton()
+        self.skip_fwd_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSkipForward))
+        self.skip_fwd_btn.setToolTip("Skip Forward 10s (Right Arrow)")
+        self.skip_fwd_btn.clicked.connect(lambda: self.skip(10000))
+        buttons_layout.addWidget(self.skip_fwd_btn)
+        
+        # Time Label
         self.time_label = QLabel("00:00 / 00:00")
         buttons_layout.addWidget(self.time_label)
         
         buttons_layout.addStretch()
         
-        # Volume control
-        volume_icon = QLabel()
-        volume_icon.setPixmap(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume).pixmap(16, 16))
-        buttons_layout.addWidget(volume_icon)
+        # Playback Speed
+        self.speed_combo = QComboBox()
+        self.speed_combo.addItems(["0.5x", "1.0x", "1.25x", "1.5x", "2.0x"])
+        self.speed_combo.setCurrentIndex(1)
+        self.speed_combo.currentTextChanged.connect(self.change_speed)
+        self.speed_combo.setToolTip("Playback Speed")
+        buttons_layout.addWidget(self.speed_combo)
+        
+        # Mute/Volume
+        self.mute_button = QPushButton()
+        self.mute_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume))
+        self.mute_button.setToolTip("Mute/Unmute (M)")
+        self.mute_button.setCheckable(True)
+        self.mute_button.clicked.connect(self.toggle_mute)
+        buttons_layout.addWidget(self.mute_button)
         
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(100)
-        self.volume_slider.setFixedWidth(100)
+        self.volume_slider.setFixedWidth(120)
+        self.volume_slider.setToolTip("Volume (Up/Down Arrows)")
         self.volume_slider.valueChanged.connect(self.set_volume)
         buttons_layout.addWidget(self.volume_slider)
         
+        # Fullscreen Toggle
+        self.fullscreen_button = QPushButton("⛶")
+        self.fullscreen_button.setToolTip("Toggle Fullscreen (F or Double Click)")
+        self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
+        buttons_layout.addWidget(self.fullscreen_button)
+        
         controls_layout.addLayout(buttons_layout)
-        layout.addLayout(controls_layout)
-        central_widget.setLayout(layout)
+        self.main_layout.addWidget(self.controls_widget)
+        self.central_widget.setLayout(self.main_layout)
 
     def setup_menu(self):
         menu_bar = self.menuBar()
@@ -105,10 +152,41 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+    def setup_shortcuts(self):
+        # Space to toggle playback handled in keyPressEvent directly for reliability
+        pass
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space:
+            self.toggle_playback()
+        elif event.key() == Qt.Key.Key_Right:
+            self.skip(10000)
+        elif event.key() == Qt.Key.Key_Left:
+            self.skip(-10000)
+        elif event.key() == Qt.Key.Key_Up:
+            self.volume_slider.setValue(min(100, self.volume_slider.value() + 5))
+        elif event.key() == Qt.Key.Key_Down:
+            self.volume_slider.setValue(max(0, self.volume_slider.value() - 5))
+        elif event.key() == Qt.Key.Key_F:
+            self.toggle_fullscreen()
+        elif event.key() == Qt.Key.Key_M:
+            self.toggle_mute()
+        elif event.key() == Qt.Key.Key_Escape and self.is_fullscreen:
+            self.toggle_fullscreen()
+        else:
+            super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):
+        if obj == self.video_widget:
+            if event.type() == QEvent.Type.MouseButtonDblClick:
+                self.toggle_fullscreen()
+                return True
+        return super().eventFilter(obj, event)
+
     def open_file(self):
         file_name, _ = QFileDialog.getOpenFileName(
             self, "Open Media", "", 
-            "Media Files (*.mp4 *.avi *.mkv *.wmv *.mp3 *.wav);;All Files (*)"
+            "Media Files (*.mp4 *.mkv *.avi *.wmv *.mov *.mp3 *.wav *.flac);;All Files (*)"
         )
         if file_name:
             self.media_player.setSource(QUrl.fromLocalFile(file_name))
@@ -124,6 +202,43 @@ class MainWindow(QMainWindow):
     def stop_playback(self):
         self.media_player.stop()
 
+    def skip(self, ms):
+        new_pos = max(0, min(self.media_player.duration(), self.media_player.position() + ms))
+        self.media_player.setPosition(new_pos)
+
+    def change_speed(self, text):
+        speed = float(text.replace('x', ''))
+        self.media_player.setPlaybackRate(speed)
+
+    def toggle_mute(self):
+        self.is_muted = not self.is_muted
+        self.mute_button.setChecked(self.is_muted)
+        
+        if self.is_muted:
+            self.last_volume = self.volume_slider.value()
+            self.audio_output.setVolume(0)
+            self.mute_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolumeMuted))
+        else:
+            self.audio_output.setVolume(self.last_volume / 100.0)
+            self.mute_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume))
+            self.volume_slider.setValue(self.last_volume)
+
+    def set_volume(self, volume):
+        if not self.is_muted:
+            self.audio_output.setVolume(volume / 100.0)
+            self.last_volume = volume
+
+    def toggle_fullscreen(self):
+        self.is_fullscreen = not self.is_fullscreen
+        if self.is_fullscreen:
+            self.controls_widget.hide()
+            self.menuBar().hide()
+            self.showFullScreen()
+        else:
+            self.controls_widget.show()
+            self.menuBar().show()
+            self.showNormal()
+
     def media_state_changed(self, state):
         if state == QMediaPlayer.PlaybackState.PlayingState:
             self.play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
@@ -131,25 +246,28 @@ class MainWindow(QMainWindow):
             self.play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
 
     def position_changed(self, position):
-        self.position_slider.setValue(position)
-        self.update_time_label()
+        if not self.position_slider.isSliderDown():
+            self.position_slider.setValue(position)
+        self.update_time_label(position, self.media_player.duration())
 
     def duration_changed(self, duration):
         self.position_slider.setRange(0, duration)
-        self.update_time_label()
+        self.update_time_label(self.media_player.position(), duration)
 
     def set_position(self, position):
         self.media_player.setPosition(position)
 
-    def set_volume(self, volume):
-        self.audio_output.setVolume(volume / 100.0)
-
-    def update_time_label(self):
-        pos = self.media_player.position() // 1000
-        dur = self.media_player.duration() // 1000
+    def update_time_label(self, position, duration):
+        pos = position // 1000
+        dur = duration // 1000
         
         pos_str = f"{pos // 60:02d}:{pos % 60:02d}"
         dur_str = f"{dur // 60:02d}:{dur % 60:02d}"
+        
+        if dur >= 3600:
+            pos_str = f"{pos // 3600:02d}:{pos_str}"
+            dur_str = f"{dur // 3600:02d}:{dur_str}"
+            
         self.time_label.setText(f"{pos_str} / {dur_str}")
 
     def handle_error(self):
